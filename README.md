@@ -3,7 +3,7 @@
 ## getting started
 
 ```
-$ pyenv shell 3.11.4 # <- figure out how to get this to run on start
+$ pyenv shell 3.11.4 # <- figure out how to get this to automatically run on start
 ```
 
 ## Prerequisites
