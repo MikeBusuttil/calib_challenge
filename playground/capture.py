@@ -10,6 +10,13 @@ while cap.isOpened():
         break
     
     mask = object_detector.apply(frame)
+    MAX_FEATURES = 3_000
+    orb = cv2.ORB_create(MAX_FEATURES)
+    kp1, des1 = orb.detectAndCompute(frame, None)
+    print(frame.shape)
+    # print(len(kp1))
+    # print(des1)
+    # print(kp1[0])
     # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     # cv2.imshow('frame', frame)
 

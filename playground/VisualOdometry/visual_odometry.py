@@ -17,10 +17,15 @@ class VisualOdometry():
     K (ndarray): Intrinsic matrix
     P (ndarray): Projection matrix
     """
-    def __init__(self, data_dir):
-        self.K, self.P = self._load_calib(os.path.join(data_dir, 'calib.txt'))
-        self.gt_poses = self._load_poses(os.path.join(data_dir,"poses.txt"))
-        self.images = self._load_images(os.path.join(data_dir,"image_l"))
+    def __init__(self, src):
+        if ".hevc" in src:
+            self.images = self._load_videos(src)
+            self.K, self.P = self._guess_calibration(self.images[0])
+            self.gt_poses = self._load_poses(os.path.join("KITTI_sequence_2", "poses.txt"))
+        else:
+            self.K, self.P = self._load_calib(os.path.join(src, 'calib.txt'))
+            self.gt_poses = self._load_poses(os.path.join(src, "poses.txt"))
+            self.images = self._load_images(os.path.join(src,"image_l"))
         MAX_FEATURES = 3_000
         self.orb = cv2.ORB_create(MAX_FEATURES)
         FLANN_INDEX_LSH = 6
@@ -48,6 +53,26 @@ class VisualOdometry():
         return K, P
 
     @staticmethod
+    def _guess_calibration(image):
+        """
+        Guesses the calibration of the camera
+
+        Returns
+        -------
+        K (ndarray): Intrinsic parameters
+        P (ndarray): Projection matrix
+        """
+        f = 910
+        height, width, _ = image.shape
+        K = np.ndarray([
+            [ f/width, 0,        width/2  ],
+            [ 0,       f/height, height/2 ],
+            [ 0,       0,        1        ]
+        ])
+        P = np.ndarray(4,4)
+        return K, P
+
+    @staticmethod
     def _load_poses(filepath):
         """
         Loads the GT poses
@@ -68,6 +93,29 @@ class VisualOdometry():
                 T = np.vstack((T, [0, 0, 0, 1]))
                 poses.append(T)
         return poses
+
+    @staticmethod
+    def _load_videos(src):
+        """
+        Loads the video
+
+        Parameters
+        ----------
+        src (str): The file path to video
+
+        Returns
+        -------
+        images (list): grayscale images
+        """
+        cap = cv2.VideoCapture(src)
+        images = []
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                print('cant read?')
+                break
+            images.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+        return images
 
     @staticmethod
     def _load_images(filepath):
@@ -240,8 +288,9 @@ class VisualOdometry():
 
 
 def main():
-    data_dir = "KITTI_sequence_2"  # Try KITTI_sequence_2 too
-    vo = VisualOdometry(data_dir)
+    src = "../labeled/3.hevc"
+    src = "KITTI_sequence_2"  # Try KITTI_sequence_2 too
+    vo = VisualOdometry(src)
 
     # play_trip(vo.images)  # Comment out to not play the trip
 
@@ -256,7 +305,7 @@ def main():
             cur_pose = np.matmul(cur_pose, np.linalg.inv(transf))
         gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
         estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
-    file_out=os.path.basename(data_dir) + ".html"
+    file_out=os.path.basename(src) + ".html"
     plotting.visualize_paths(gt_path, estimated_path, "Visual Odometry", file_out=file_out)
     Command('explorer.exe')(file_out, _ok_code=[0,1])
 
