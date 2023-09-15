@@ -1,12 +1,14 @@
 import os
 import numpy as np
 import cv2
+import math
 
 from lib.visualization import plotting
 from lib.visualization.video import play_trip
 
 from tqdm import tqdm
 from sh import Command
+from sigfig import round
 
 
 class VisualOdometry():
@@ -26,8 +28,10 @@ class VisualOdometry():
             self.K, self.P = self._load_calib(os.path.join(src, 'calib.txt'))
             self.gt_poses = self._load_poses(os.path.join(src, "poses.txt"))
             self.images = self._load_images(os.path.join(src,"image_l"))
+
         MAX_FEATURES = 3_000
         self.orb = cv2.ORB_create(MAX_FEATURES)
+
         FLANN_INDEX_LSH = 6
         index_params = dict(algorithm=FLANN_INDEX_LSH, table_number=6, key_size=12, multi_probe_level=1)
         search_params = dict(checks=50)
@@ -69,6 +73,8 @@ class VisualOdometry():
             [ 0,       f/height, height/2 ],
             [ 0,       0,        1        ]
         ])
+        # Note: the center of the sensor differs a bit from the optical center of the lens system
+        # which means the c_x (width/2) & c_y (height/2) values are off by a little bit
         P = np.ndarray(4,4)
         return K, P
 
@@ -192,9 +198,8 @@ class VisualOdometry():
 
         img3 = cv2.drawMatches(self.images[i], kp1, self.images[i-1], kp2, good, None, **draw_params)
         cv2.imshow("image", img3)
-        # cv2.waitKey(200)
         if cv2.waitKey(51) == ord('q'):
-            end()
+            exit()
 
         # Get the image points form the good matches
         q1 = np.float32([kp1[m.queryIdx].pt for m in good])
@@ -286,6 +291,30 @@ class VisualOdometry():
 
         return [R1, t]
 
+    @staticmethod
+    def get_euler_angles(T, units='radians'):
+        R = T[:3, :3]
+
+        #TODO: ensure roll & pitch aren't interchanged
+        cosine_for_yaw = math.sqrt(R[0][0] ** 2 + R[1][0] ** 2)
+        is_singular = cosine_for_yaw < 10**-6
+        if not is_singular:
+            pitch = math.atan2(R[1][0], R[0][0])
+            yaw = math.atan2(-R[2][0], cosine_for_yaw)
+            roll = math.atan2(R[2][1], R[2][2])
+        else:
+            pitch = math.atan2(-R[1][2], R[1][1])
+            yaw = math.atan2(-R[2][0], cosine_for_yaw)
+            roll = 0
+
+        if units == 'degrees':
+            return roll* 180 / math.pi, pitch * 180 / math.pi, yaw * 180 / math.pi
+        return roll, pitch, yaw
+    
+    @staticmethod
+    def present(num):
+        sign = '-' if num < 0 else '+'
+        return sign + round(abs(num), decimals=2, output=str).rjust(5)
 
 def main():
     src = "../labeled/3.hevc"
@@ -296,6 +325,7 @@ def main():
 
     gt_path = []
     estimated_path = []
+    roll_total, pitch_total, yaw_total = 0, 0, 0
     for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="pose")):
         if i == 0:
             cur_pose = gt_pose
@@ -303,6 +333,10 @@ def main():
             q1, q2 = vo.get_matches(i)
             transf = vo.get_pose(q1, q2)
             cur_pose = np.matmul(cur_pose, np.linalg.inv(transf))
+            roll, pitch, yaw = vo.get_euler_angles(transf, units='degrees')
+            roll_total, pitch_total, yaw_total = roll + roll_total, pitch + pitch_total, yaw + yaw_total
+            print(f'roll is {vo.present(roll)      }°, pitch is {vo.present(pitch)      }°, yaw is {vo.present(yaw)      }°')
+            print(f'        {vo.present(roll_total)}°           {vo.present(pitch_total)}°         {vo.present(yaw_total)}°')
         gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
         estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
     file_out=os.path.basename(src) + ".html"
