@@ -293,9 +293,26 @@ class VisualOdometry():
 
     @staticmethod
     def get_euler_angles(T, units='radians'):
+        """
+        Calculates the Euler angles from a given transformation matrix using RzRyRx method
+
+        where Ry is yaw, Rx is pitch, Rz is roll
+
+        Parameters
+        ----------
+        T (ndarray):    Transformation Matrix
+        units (string): Either 'degrees' or 'radians' (default)
+
+        Returns
+        -------
+        roll (float):  the magnitude of the roll
+        pitch (float): the magnitude of the pitch
+        yaw (float):   the magnitude of the yaw
+        """
         R = T[:3, :3]
 
         #TODO: ensure roll & pitch aren't interchanged
+        #TODO: test 11 other orderings against pre-trained sets to see if the rotation order matters
         cosine_for_yaw = math.sqrt(R[0][0] ** 2 + R[1][0] ** 2)
         is_singular = cosine_for_yaw < 10**-6
         if not is_singular:
@@ -303,6 +320,7 @@ class VisualOdometry():
             yaw = math.atan2(-R[2][0], cosine_for_yaw)
             roll = math.atan2(R[2][1], R[2][2])
         else:
+            print("no roll\n\n\n")
             pitch = math.atan2(-R[1][2], R[1][1])
             yaw = math.atan2(-R[2][0], cosine_for_yaw)
             roll = 0
