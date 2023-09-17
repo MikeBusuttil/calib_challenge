@@ -8,5 +8,7 @@ $ pyenv shell 3.11.4 # <- figure out how to get this to automatically run on sta
 
 ## Prerequisites
 
-- opencv (python)
-- pyenv
+- pyenv environment with
+  - opencv (python)
+  - pandas
+  - numpy

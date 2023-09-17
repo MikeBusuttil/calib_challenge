@@ -1,10 +1,12 @@
 import os
 import numpy as np
+import pandas as pd
 import cv2
 import math
 
 from lib.visualization import plotting
 from lib.visualization.video import play_trip
+from lib.visualization.colorize import colorize
 
 from tqdm import tqdm
 from sh import Command
@@ -157,14 +159,24 @@ class VisualOdometry():
         T[:3, :3] = R
         T[:3, 3] = t
         return T
+    
+    @staticmethod
+    def points_distance(p0, p1):
+        return math.sqrt((p0[0]-p1[0])**2+(p0[1]-p1[1])**2)
+    
+    @staticmethod
+    def points_relative(p0, p1):
+        dx = p1[0] - p0[0]
+        dy = p1[1] - p0[1]
+        return (p0[0] + dx, p0[1] + dy)
 
-    def get_matches(self, i):
+    def get_matches(self, f):
         """
         This function detect and compute keypoints and descriptors from the i-1'th and i'th image using the class orb object
 
         Parameters
         ----------
-        i (int): The current frame
+        f (int): The current frame
 
         Returns
         -------
@@ -172,36 +184,85 @@ class VisualOdometry():
         q2 (ndarray(2-dim ndarray)): The good keypoints matches position in i'th image
         """
         # Find the keypoints and descriptors with ORB
-        kp1, des1 = self.orb.detectAndCompute(self.images[i - 1], None)
-        kp2, des2 = self.orb.detectAndCompute(self.images[i], None)
+        kp1, des1 = self.orb.detectAndCompute(self.images[f - 1], None)
+        kp2, des2 = self.orb.detectAndCompute(self.images[f], None)
 
-        # print(kp1[1].class_id, kp1[1].pt)
-        # print(des1)
-        # print(des2)
-        # print(list(des1[0]))
         # Find matches
         matches = self.flann.knnMatch(des1, des2, k=2)
 
-        # Find the matches there do not have a to high distance
-        good = []
+        # Filter out the matches with overly dissimilar "distance"'s.  For a description of "distance" see:
+        # https://stackoverflow.com/questions/16996800/what-does-the-distance-attribute-in-dmatches-mean 
+        _matches = []
         try:
             for m1, m2 in matches:
                 if m1.distance < 0.8 * m2.distance:
-                    good.append(m1)
+                    _matches.append([m1,m2])
         except ValueError:
             pass
+        print(f'{len(matches)} -> {len(_matches)}')
+        matches = _matches
 
-        draw_params = dict(matchColor = -1, # draw matches in green color
-                 singlePointColor = -1,
-                 matchesMask = None, # draw only inliers
-                 flags = 2)
+        #Filter out matches that indicate significant vertical movement (dirty hack)
+        height_filter = False
+        # height_filter = True
+        if height_filter:
+            rises = pd.DataFrame([kp2[m2.trainIdx].pt[1] - kp1[m1.queryIdx].pt[1] for m1, m2 in matches])
+            _matches = []
+            for m1, m2 in matches:
+                if abs(kp2[m2.trainIdx].pt[1] - kp1[m1.queryIdx].pt[1]) < 2*rises.std()[0]:
+                    _matches.append([m1,m2])
+            print(f'{len(matches)} -> {len(_matches)}')
+            matches = _matches
 
-        img3 = cv2.drawMatches(self.images[i], kp1, self.images[i-1], kp2, good, None, **draw_params)
+        #Filter out matches that indicate significant movement (doesn't always work in general)
+        distance_filter = False
+        distance_filter = True
+        if distance_filter:
+            distances = pd.DataFrame([self.points_distance(kp1[m1.queryIdx].pt, kp2[m2.trainIdx].pt) for m1, m2 in matches])
+            # plotting.histogram(distances)
+            max_distance = distances.std()[0]/2
+            _matches = []
+            for m1, m2 in matches:
+                if self.points_distance(kp1[m1.queryIdx].pt, kp2[m2.trainIdx].pt) < max_distance:
+                    _matches.append([m1,m2])
+            print(f'{len(matches)} -> {len(_matches)}')
+            matches = _matches
+
+        #TODO: filter out points that differ wildly in magnitude or direction from their neighbors
+        #TODO: filter out points on cars
+        #TODO: look at some of the matches that got filtered out to make sure baby not being thrown out with bathwater
+        #TODO: compare (numerically) the different filter strategy combinations in 1 run
+        good = [m1 for m1, m2 in matches]
+
+        custom_view = False
+        custom_view = True
+        if custom_view:
+            imgL = cv2.cvtColor(np.ndarray.copy(self.images[f-1]), cv2.COLOR_GRAY2RGB)
+            imgR = cv2.cvtColor(np.ndarray.copy(self.images[f]), cv2.COLOR_GRAY2RGB)
+            for m, (m1, m2) in enumerate(matches):
+                color = colorize(m*100/(len(matches) - 1))
+                pL, pR = tuple(map(int, kp1[m1.queryIdx].pt)), tuple(map(int, kp2[m2.trainIdx].pt))
+                imgL = cv2.circle(imgL, pL, 5, color)
+                imgR = cv2.circle(imgR, pR, 5, color)
+                imgL = cv2.line(imgL, pL, self.points_relative(pL, pR), color)
+                imgR = cv2.line(imgR, pR, self.points_relative(pR, pL), color)
+            img3 = np.concatenate((imgL, imgR), axis=0)
+        else:
+            draw_params = dict(
+                matchesMask = None, # draw only inliers
+                flags = 2
+            )
+            img3 = cv2.drawMatches(self.images[f-1], kp1, self.images[f], kp2, good, None, **draw_params)
         cv2.imshow("image", img3)
-        if cv2.waitKey(51) == ord('q'):
-            exit()
+        pressed_key = cv2.waitKey(1)
+        if pressed_key != -1:
+            if pressed_key == ord('q'):
+                exit()
+            if cv2.waitKey() == ord('q'):
+                exit()
 
         # Get the image points form the good matches
+        # Note: kp2 uses trainIdx while kp1 uses queryIdx
         q1 = np.float32([kp1[m.queryIdx].pt for m in good])
         q2 = np.float32([kp2[m.trainIdx].pt for m in good])
         return q1, q2

@@ -96,3 +96,8 @@ def plot_sparsity(sparse_mat):
     plt.ylabel("Resudals")
 
     plt.show()
+
+def histogram(values):
+    fig, ax = plt.subplots()
+    values.hist(ax=ax, bins=100)
+    fig.savefig('hist.png')
